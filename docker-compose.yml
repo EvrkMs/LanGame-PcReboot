@@ -1,0 +1,14 @@
+services:
+  langame-bot:
+    build:
+      context: ./LangameBot
+      dockerfile: Dockerfile
+    container_name: langame-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Можно переопределить/задать прямо тут, но удобнее в .env
+      TZ: ${TZ:-Europe/Bucharest}
+      LANGAME_BASE_URL: ${LANGAME_BASE_URL:-https://226.langame.ru}
+      # TELEGRAM_BOT_TOKEN / LANGAME_API_KEY подтянутся из .env
