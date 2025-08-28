@@ -1,0 +1,27 @@
+# Example allowlist of Telegram chat IDs.
+# Copy this file to `allowed_ids.yml` and put your real IDs there.
+# Do NOT commit `allowed_ids.yml` — it is in .gitignore.
+#
+# Supported formats:
+# 1) Plain list (recommended):
+# - 123456789
+# - 987654321
+#
+# 2) Object with a list (any of these keys work):
+# allowlist:
+#   - 123456789
+#   - 987654321
+#
+# You can change the path via env var `ALLOWED_IDS_YML`.
+# If the file is missing or empty, ALL chat IDs are allowed.
+
+# Plain list example (uncomment and edit):
+# - 111111111
+# - 222222222
+# - 333333333
+
+# Object example (uncomment and edit):
+# allowlist:
+#   - 111111111
+#   - 222222222
+#   - 333333333
