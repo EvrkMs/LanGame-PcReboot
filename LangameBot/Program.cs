@@ -117,6 +117,17 @@ public class Program
 
     private static Task HandleErrorAsync(ITelegramBotClient bot, Exception ex, CancellationToken ct)
     {
+        // Suppress expected long-poll timeouts and cancellations from Telegram long polling
+        if (ex is TaskCanceledException || ex is OperationCanceledException || ex is TimeoutException)
+            return Task.CompletedTask;
+
+        if (ex is Telegram.Bot.Exceptions.RequestException reqEx)
+        {
+            var msg = reqEx.Message ?? string.Empty;
+            if (msg.Contains("timed out", StringComparison.OrdinalIgnoreCase))
+                return Task.CompletedTask;
+        }
+
         Console.WriteLine($"[Telegram Error] {ex}");
         return Task.CompletedTask;
     }
