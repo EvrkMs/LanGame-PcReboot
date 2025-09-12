@@ -10,5 +10,5 @@ services:
     environment:
       # Можно переопределить/задать прямо тут, но удобнее в .env
       TZ: ${TZ:-Europe/Bucharest}
-      LANGAME_BASE_URL: ${LANGAME_BASE_URL:-https://226.langame.ru}
+      LANGAME_BASE_URL: ${LANGAME_BASE_URL}
       # TELEGRAM_BOT_TOKEN / LANGAME_API_KEY подтянутся из .env
