@@ -18,6 +18,14 @@ public class Program
     private static readonly string? BaseUrlEnv = Environment.GetEnvironmentVariable("LANGAME_BASE_URL");
     private static readonly string BaseUrl = (BaseUrlEnv ?? throw new InvalidOperationException("ENV LANGAME_BASE_URL is not set.")).TrimEnd('/');
     private static readonly string AllowlistPath = Environment.GetEnvironmentVariable("ALLOWED_IDS_YML") ?? "allowed_ids.yml";
+    private static readonly string? ApiTimeoutEnv = Environment.GetEnvironmentVariable("LANGAME_HTTP_TIMEOUT_SECONDS");
+    private static readonly string? ApiRetryEnv = Environment.GetEnvironmentVariable("LANGAME_HTTP_RETRY_COUNT");
+    private static readonly int ApiTimeoutSeconds = int.TryParse(ApiTimeoutEnv, out var parsedTimeout) && parsedTimeout > 0
+        ? parsedTimeout
+        : 30;
+    private static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(ApiTimeoutSeconds);
+    private static readonly int ApiRequestMaxRetries = Math.Clamp(int.TryParse(ApiRetryEnv, out var parsedRetry) ? parsedRetry : 3, 1, 6);
+    private static readonly Lazy<HttpClient> ApiHttpClientLazy = new(BuildHttpClient);
     private static HashSet<long> AllowedChatIds = new();
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -134,8 +142,6 @@ public class Program
 
     private static async Task<List<string>> RebootAndReportAsync(CancellationToken ct)
     {
-        using var http = BuildHttpClient();
-
         // 1) POST /public_api/pc/manage (club_id=1, type=free)
         var manageReq = new ManageRequest
         {
@@ -145,14 +151,15 @@ public class Program
             Uuids = null
         };
 
-        using var manageContent = new StringContent(JsonSerializer.Serialize(manageReq, JsonOpts), Encoding.UTF8, "application/json");
-        using var manageHttpReq = new HttpRequestMessage(HttpMethod.Post, "/public_api/pc/manage");
-        manageHttpReq.Content = manageContent;
-
-        using var manageResp = await http.SendAsync(manageHttpReq, ct);
-        manageResp.EnsureSuccessStatusCode();
-
-        var manageJson = await manageResp.Content.ReadAsStringAsync(ct);
+        var managePayload = JsonSerializer.Serialize(manageReq, JsonOpts);
+        var manageJson = await SendApiRequestAsync(() =>
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/public_api/pc/manage")
+            {
+                Content = new StringContent(managePayload, Encoding.UTF8, "application/json")
+            };
+            return request;
+        }, ct);
         var manage = JsonSerializer.Deserialize<ManageResponse>(manageJson, JsonOpts)
                      ?? throw new InvalidOperationException("Не удалось распарсить ответ manage.");
 
@@ -162,11 +169,7 @@ public class Program
         // 2) GET /global/linking_pc_by_type/list
         // Если бек ожидает фильтры, лучше сразу явно указать:
         var listUrl = "/public_api/global/linking_pc_by_type/list?club_id=1&type=free";
-        using var listReq = new HttpRequestMessage(HttpMethod.Get, listUrl);
-
-        using var listResp = await http.SendAsync(listReq, ct);
-        listResp.EnsureSuccessStatusCode();
-        var listJson = await listResp.Content.ReadAsStringAsync(ct);
+        var listJson = await SendApiRequestAsync(() => new HttpRequestMessage(HttpMethod.Get, listUrl), ct);
 
         var pcs = DeserializeLinkedPcList(listJson);
 
@@ -194,6 +197,8 @@ public class Program
         return lines;
     }
 
+    private static HttpClient ApiHttpClient => ApiHttpClientLazy.Value;
+
     private static HttpClient BuildHttpClient()
     {
         var http = new HttpClient(new SocketsHttpHandler
@@ -203,7 +208,7 @@ public class Program
             MaxConnectionsPerServer = 10
         })
         {
-            Timeout = TimeSpan.FromSeconds(15),
+            Timeout = ApiTimeout,
             BaseAddress = new Uri(BaseUrl + "/")
         };
         http.DefaultRequestHeaders.Add("Accept", "*/*");
@@ -211,6 +216,38 @@ public class Program
         http.DefaultRequestHeaders.Remove("X-API-KEY");
         http.DefaultRequestHeaders.Add("X-API-KEY", ApiKey!);
         return http;
+    }
+
+    private static async Task<string> SendApiRequestAsync(Func<HttpRequestMessage> requestFactory, CancellationToken ct)
+    {
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= ApiRequestMaxRetries; attempt++)
+        {
+            using var request = requestFactory();
+            try
+            {
+                using var response = await ApiHttpClient.SendAsync(request, ct);
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadAsStringAsync(ct);
+            }
+            catch (TaskCanceledException ex) when (!ct.IsCancellationRequested && attempt < ApiRequestMaxRetries)
+            {
+                lastError = ex;
+            }
+            catch (HttpRequestException ex) when (attempt < ApiRequestMaxRetries)
+            {
+                lastError = ex;
+            }
+
+            var delayMs = Math.Min(500 * (1 << (attempt - 1)), 4000);
+            await Task.Delay(delayMs, ct);
+        }
+
+        if (lastError is not null)
+            throw lastError;
+
+        throw new InvalidOperationException("Не удалось выполнить запрос к API.");
     }
 
     private static List<LinkedPc> DeserializeLinkedPcList(string json)
