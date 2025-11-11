@@ -12,3 +12,4 @@ services:
       TZ: ${TZ:-Europe/Bucharest}
       LANGAME_BASE_URL: ${LANGAME_BASE_URL}
       # TELEGRAM_BOT_TOKEN / LANGAME_API_KEY подтянутся из .env
+    network_mode: host
